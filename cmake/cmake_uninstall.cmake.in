@@ -1,0 +1,54 @@
+if(NOT EXISTS "@CMAKE_CURRENT_BINARY_DIR@/install_manifest.txt")
+    message(FATAL_ERROR "Cannot find install_manifest.txt. Run install target first.")
+endif()
+
+file(READ "@CMAKE_CURRENT_BINARY_DIR@/install_manifest.txt" files)
+string(REPLACE "\n" ";" files "${files}")
+
+# Track directories for cleanup
+set(dirs "")
+
+foreach(file ${files})
+    if(EXISTS "${file}" OR IS_SYMLINK "${file}")
+        message(STATUS "Removing ${file}")
+        execute_process(
+            COMMAND ${CMAKE_COMMAND} -E remove "${file}"
+            RESULT_VARIABLE result
+        )
+        if(NOT result EQUAL 0)
+            message(WARNING "Failed to remove ${file}")
+        endif()
+
+        # Collect parent directory for potential cleanup
+        get_filename_component(dir "${file}" DIRECTORY)
+        list(APPEND dirs "${dir}")
+    else()
+        message(STATUS "File not found: ${file}")
+    endif()
+endforeach()
+
+# Remove duplicate directories and sort by depth (deepest first)
+if(dirs)
+    list(REMOVE_DUPLICATES dirs)
+    list(SORT dirs)
+    list(REVERSE dirs)
+
+    # Try to remove empty directories
+    foreach(dir ${dirs})
+        if(EXISTS "${dir}")
+            file(GLOB dir_contents "${dir}/*")
+            if(NOT dir_contents)
+                message(STATUS "Removing empty directory: ${dir}")
+                execute_process(
+                    COMMAND ${CMAKE_COMMAND} -E remove_directory "${dir}"
+                    RESULT_VARIABLE result
+                )
+                if(NOT result EQUAL 0)
+                    message(STATUS "Could not remove directory ${dir} (may not be empty or lacks permissions)")
+                endif()
+            endif()
+        endif()
+    endforeach()
+endif()
+
+message(STATUS "Uninstall complete")

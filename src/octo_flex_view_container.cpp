@@ -1,0 +1,503 @@
+// SPDX-License-Identifier: Apache-2.0
+//
+// Copyright (c) 2026 Qi Wang
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+
+#include "octo_flex_view_container.h"
+#include <QBoxLayout>
+#include <QFocusEvent>
+#include <QMouseEvent>
+#include <QSplitter>
+#include <QTimer>
+#include <iostream>
+
+namespace octo_flex {
+
+OctoFlexViewContainer::OctoFlexViewContainer(QWidget* parent)
+    : QWidget(parent), currentView_(nullptr), expandedView_(nullptr), objectManager_(nullptr) {
+    // Create main layout.
+    auto layout = new QVBoxLayout(this);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(0);
+
+    // Create main splitter.
+    mainSplitter_ = new QSplitter(this);
+    mainSplitter_->setHandleWidth(1);
+    layout->addWidget(mainSplitter_);
+
+    // Set layout.
+    setLayout(layout);
+}
+
+OctoFlexViewContainer::~OctoFlexViewContainer() {
+    // Clear view list.
+    views_.clear();
+}
+
+OctoFlexView* OctoFlexViewContainer::getCurrentView() const { return currentView_; }
+
+std::vector<OctoFlexView*> OctoFlexViewContainer::getAllViews() const {
+    // Return views_ directly, including views not yet added to splitters.
+    return views_;
+}
+
+void OctoFlexViewContainer::setObjectManager(ObjectManager::Ptr obj_mgr) {
+    objectManager_ = obj_mgr;
+
+    // Apply object manager to all views.
+    for (auto* view : views_) {
+        if (view) {
+            view->setObjectManager(obj_mgr);
+        }
+    }
+}
+
+OctoFlexView* OctoFlexViewContainer::createInitialView() {
+    // If views already exist, skip creation.
+    if (!views_.empty()) {
+        return currentView_;
+    }
+
+    // Create initial view and add to the main splitter.
+    OctoFlexView* view = createView();
+    mainSplitter_->addWidget(view);
+
+    // Set current view and return.
+    currentView_ = view;
+
+    // Ensure the initial view gains focus.
+    view->setFocus();
+
+    // Mark as the only view.
+    view->setIsOnlyView(true);
+
+    return view;
+}
+
+void OctoFlexViewContainer::splitVertical() {
+    // Split current view vertically (top/bottom).
+    if (currentView_) {
+        splitView(currentView_, Qt::Vertical);
+    }
+}
+
+void OctoFlexViewContainer::splitHorizontal() {
+    // Split current view horizontally (left/right).
+    if (currentView_) {
+        splitView(currentView_, Qt::Horizontal);
+    }
+}
+
+void OctoFlexViewContainer::removeCurrentView() {
+    if (currentView_) {
+        removeView(currentView_);
+    }
+}
+
+void OctoFlexViewContainer::extendViewContextMenu(OctoFlexView* view) {
+    // Add event filter to monitor context menu events.
+    view->installEventFilter(this);
+}
+
+bool OctoFlexViewContainer::eventFilter(QObject* watched, QEvent* event) {
+    if (auto* view = qobject_cast<OctoFlexView*>(watched)) {
+        // Focus event: update current view.
+        if (event->type() == QEvent::FocusIn) {
+            currentView_ = view;
+        }
+        // Context menu event: add view actions.
+        else if (event->type() == QEvent::ContextMenu) {
+            // Add our actions after OctoFlexView creates its menu.
+            // Use a queued connection to ensure the original menu exists.
+            QMetaObject::Connection connection;
+            connection = connect(view, &QObject::destroyed, [&connection]() { QObject::disconnect(connection); });
+
+            // Delay to ensure the original menu is created.
+            QTimer::singleShot(0, this, [this, view, connection]() {
+                if (!view) return;
+
+                QObject::disconnect(connection);
+
+                // Find the view's context menu.
+                QMenu* menu = view->findChild<QMenu*>();
+                if (menu) {
+                    // Add separator.
+                    menu->addSeparator();
+
+                    // Add view actions group.
+                    QMenu* viewMenu = menu->addMenu("View Actions");
+
+                    // Add vertical split action.
+                    QAction* splitVerticalAction = new QAction("Split Vertical", viewMenu);
+                    connect(splitVerticalAction, &QAction::triggered, this, &OctoFlexViewContainer::splitVertical);
+                    viewMenu->addAction(splitVerticalAction);
+
+                    // Add horizontal split action.
+                    QAction* splitHorizontalAction = new QAction("Split Horizontal", viewMenu);
+                    connect(splitHorizontalAction, &QAction::triggered, this, &OctoFlexViewContainer::splitHorizontal);
+                    viewMenu->addAction(splitHorizontalAction);
+
+                    // Only add remove action when multiple views exist.
+                    if (views_.size() > 1) {
+                        viewMenu->addSeparator();
+                        QAction* removeAction = new QAction("Remove View", viewMenu);
+                        connect(removeAction, &QAction::triggered, this, &OctoFlexViewContainer::removeCurrentView);
+                        viewMenu->addAction(removeAction);
+                    }
+                }
+            });
+        }
+    }
+    return QWidget::eventFilter(watched, event);
+}
+
+OctoFlexView* OctoFlexViewContainer::createView() {
+    // Create new view.
+    OctoFlexView* view = new OctoFlexView(this);
+
+    // Assign a unique view ID.
+    std::string viewId = "View " + std::to_string(viewIdCounter_++);
+    view->setViewId(viewId);
+
+    // Set object manager for the view.
+    if (objectManager_) {
+        view->setObjectManager(objectManager_);
+    }
+
+    // Initialize view and extend its context menu.
+    view->initialize();
+    extendViewContextMenu(view);
+
+    // Connect view split/remove signals.
+    connect(view, &OctoFlexView::requestHorizontalSplit, this, &OctoFlexViewContainer::splitHorizontal);
+    connect(view, &OctoFlexView::requestVerticalSplit, this, &OctoFlexViewContainer::splitVertical);
+    connect(view, &OctoFlexView::requestViewRemove, this, &OctoFlexViewContainer::removeCurrentView);
+
+    // Connect view expand/collapse signals.
+    connect(view, &OctoFlexView::requestExpand, this, &OctoFlexViewContainer::expandCurrentView);
+    connect(view, &OctoFlexView::requestCollapse, this, &OctoFlexViewContainer::collapseCurrentView);
+
+    // Add to view list.
+    views_.push_back(view);
+
+    // Update "only view" state for all views.
+    updateViewsOnlyStatus();
+
+    return view;
+}
+
+OctoFlexView* OctoFlexViewContainer::splitView(OctoFlexView* view, Qt::Orientation orientation) {
+    // Find the view's parent splitter.
+    QSplitter* parentSplitter = findParentSplitter(view);
+    if (!parentSplitter) {
+        std::cerr << "Failed to find the view's parent splitter!" << std::endl;
+        return nullptr;
+    }
+
+    // Get the view index in its parent splitter.
+    int index = parentSplitter->indexOf(view);
+    if (index == -1) {
+        std::cerr << "View not found in parent splitter!" << std::endl;
+        return nullptr;
+    }
+
+    // Save current view size and all splitter sizes.
+    QList<int> originalSizes = parentSplitter->sizes();
+    int currentSize = originalSizes[index];
+
+    // Check parent splitter orientation.
+    bool needNewSplitter = parentSplitter->orientation() != orientation;
+
+    OctoFlexView* newView = nullptr;
+
+    if (needNewSplitter) {
+        // Need a new splitter.
+        QSplitter* newSplitter = new QSplitter(orientation, parentSplitter);
+        newSplitter->setHandleWidth(1);
+
+        // Move view into the new splitter.
+        parentSplitter->insertWidget(index, newSplitter);
+        view->setParent(newSplitter);
+        newSplitter->addWidget(view);
+
+        // Create new view and add to the new splitter.
+        newView = createView();
+        newSplitter->addWidget(newView);
+
+        // Split space evenly in the new splitter.
+        newSplitter->setSizes(QList<int>() << currentSize / 2 << currentSize / 2);
+
+        // Restore original sizes in parent splitter to keep other views unchanged.
+        parentSplitter->setSizes(originalSizes);
+    } else {
+        // Same orientation; insert new view directly.
+        newView = createView();
+        parentSplitter->insertWidget(index + 1, newView);
+
+        // Preserve original sizes.
+        QList<int> newSizes = originalSizes;
+
+        // Only adjust the split view; keep other sizes unchanged.
+        newSizes[index] = currentSize / 2;            // Current view halves.
+        newSizes.insert(index + 1, currentSize / 2);  // New view takes the other half.
+
+        // Fix: remove last element if size list grew after insertion.
+        if (newSizes.size() > parentSplitter->count()) {
+            newSizes.removeLast();
+        }
+
+        // Apply new size settings.
+        parentSplitter->setSizes(newSizes);
+    }
+
+    // Copy settings from the original view to the new view.
+    if (newView) {
+        // Copy hidden layers.
+        newView->setUnvisableLayers(view->getUnvisableLayers());
+
+        // Copy unselectable layers.
+        newView->setUnselectableLayers(view->getUnselectableLayers());
+
+        // Copy projection mode.
+        newView->setPerspectiveMode(view->isPerspectiveMode());
+
+        // Copy info panel visibility.
+        if (view->isInfoPanelVisible() != newView->isInfoPanelVisible()) {
+            newView->toggleInfoPanel();
+        }
+
+        if (view->isGridVisible() != newView->isGridVisible()) {
+            newView->toggleGrid();
+        }
+
+        // Copy camera settings (use copyCamera).
+        newView->copyCamera(view->getCamera());
+
+        // Update current view.
+        currentView_ = newView;
+
+        // Ensure the new view gains focus.
+        newView->setFocus();
+    }
+
+    return newView;
+}
+
+void OctoFlexViewContainer::removeView(OctoFlexView* view) {
+    // Find in view list.
+    auto it = std::find(views_.begin(), views_.end(), view);
+    if (it == views_.end()) {
+        std::cerr << "View to remove is not in the list!" << std::endl;
+        return;
+    }
+
+    // Do not remove the last view.
+    if (views_.size() <= 1) {
+        std::cerr << "This is the last view; removal is not allowed!" << std::endl;
+        return;
+    }
+
+    // Remove from view list.
+    views_.erase(it);
+
+    // Find the view's splitter.
+    QSplitter* parentSplitter = findParentSplitter(view);
+    if (!parentSplitter) {
+        std::cerr << "Failed to find the view's parent splitter!" << std::endl;
+        return;
+    }
+
+    // Remove view from parent widget.
+    view->setParent(nullptr);
+    view->deleteLater();
+
+    // If current view is removed, select a new current view.
+    if (view == currentView_) {
+        if (!views_.empty()) {
+            currentView_ = views_.front();
+            currentView_->setFocus();
+        } else {
+            currentView_ = nullptr;
+        }
+    }
+
+    // Clean up empty splitters.
+    cleanupEmptySplitters(mainSplitter_);
+
+    // Update "only view" state.
+    updateViewsOnlyStatus();
+}
+
+QSplitter* OctoFlexViewContainer::findParentSplitter(OctoFlexView* view) const {
+    // Find the view's parent splitter.
+    QWidget* parent = view->parentWidget();
+    while (parent) {
+        if (auto* splitter = qobject_cast<QSplitter*>(parent)) {
+            return splitter;
+        }
+        parent = parent->parentWidget();
+    }
+    return nullptr;
+}
+
+void OctoFlexViewContainer::expandCurrentView() {
+    if (!currentView_ || expandedView_) {
+        return;  // No current view or already expanded.
+    }
+
+    // Save current view sizes.
+    saveViewSizes();
+
+    // Walk up splitters from current view and set sizes.
+    QWidget* current = currentView_;
+    while (current && current != this) {
+        QSplitter* parentSplitter = qobject_cast<QSplitter*>(current->parentWidget());
+        if (parentSplitter) {
+            // Get current widget index in parent splitter.
+            int index = parentSplitter->indexOf(current);
+            if (index != -1) {
+                // Set parent splitter sizes, zero out others.
+                QList<int> sizes = parentSplitter->sizes();
+                for (int i = 0; i < sizes.size(); ++i) {
+                    if (i != index) {
+                        sizes[i] = 0;
+                    }
+                }
+                parentSplitter->setSizes(sizes);
+            }
+        }
+        // Move up to parent widget.
+        current = current->parentWidget();
+    }
+
+    // Mark current view as expanded.
+    expandedView_ = currentView_;
+
+    // Notify view it is expanded.
+    currentView_->expandView();
+
+    // Update layout.
+    layout()->update();
+
+    // Ensure current view has focus.
+    currentView_->setFocus();
+}
+
+void OctoFlexViewContainer::collapseCurrentView() {
+    if (!expandedView_) {
+        return;  // No expanded view.
+    }
+
+    // Show all views.
+    for (auto* view : views_) {
+        view->show();
+    }
+
+    // Restore original sizes.
+    restoreViewSizes();
+
+    // Notify view it is collapsed.
+    expandedView_->collapseView();
+
+    // Clear expanded view marker.
+    expandedView_ = nullptr;
+
+    // Update layout.
+    layout()->update();
+
+    // Ensure current view has focus.
+    if (currentView_) {
+        currentView_->setFocus();
+    }
+}
+
+void OctoFlexViewContainer::saveViewSizes() {
+    // Clear previously saved sizes.
+    savedSplitterSizes_.clear();
+
+    // Walk all splitters and save their sizes.
+    std::function<void(QWidget*)> saveSizes = [this, &saveSizes](QWidget* widget) {
+        // If widget is a splitter, save its sizes.
+        if (auto* splitter = qobject_cast<QSplitter*>(widget)) {
+            savedSplitterSizes_[splitter] = splitter->sizes();
+
+            // Walk splitter children.
+            for (int i = 0; i < splitter->count(); ++i) {
+                saveSizes(splitter->widget(i));
+            }
+        }
+    };
+
+    // Start from main splitter.
+    saveSizes(mainSplitter_);
+}
+
+void OctoFlexViewContainer::restoreViewSizes() {
+    // Restore sizes for all saved splitters.
+    for (const auto& pair : savedSplitterSizes_) {
+        if (pair.first) {  // Ensure splitter is still valid.
+            pair.first->setSizes(pair.second);
+        }
+    }
+
+    // Clear saved sizes.
+    savedSplitterSizes_.clear();
+}
+
+void OctoFlexViewContainer::updateViewsOnlyStatus() {
+    // Use views_ list to include views not added to splitters.
+    bool isOnlyOneView = (views_.size() == 1);
+
+    for (auto* view : views_) {
+        view->setIsOnlyView(isOnlyOneView);
+    }
+}
+
+void OctoFlexViewContainer::cleanupEmptySplitters(QWidget* widget) {
+    // If widget is a splitter, check and clean.
+    QSplitter* splitter = qobject_cast<QSplitter*>(widget);
+    if (!splitter) {
+        return;
+    }
+
+    // Recursively clean child widgets first.
+    for (int i = splitter->count() - 1; i >= 0; --i) {
+        QWidget* childWidget = splitter->widget(i);
+        cleanupEmptySplitters(childWidget);
+    }
+
+    // Remove empty splitters (except main).
+    if (splitter->count() == 0 && splitter != mainSplitter_) {
+        splitter->setParent(nullptr);
+        splitter->deleteLater();
+        return;
+    }
+
+    // If splitter has one child and isn't main, promote the child to the parent splitter.
+    if (splitter->count() == 1 && splitter != mainSplitter_) {
+        QWidget* childWidget = splitter->widget(0);
+        QSplitter* parentSplitter = qobject_cast<QSplitter*>(splitter->parent());
+
+        if (parentSplitter) {
+            int index = parentSplitter->indexOf(splitter);
+            childWidget->setParent(nullptr);
+            splitter->setParent(nullptr);
+            parentSplitter->insertWidget(index, childWidget);
+            splitter->deleteLater();
+        }
+    }
+}
+
+}  // namespace octo_flex

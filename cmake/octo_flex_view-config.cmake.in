@@ -1,0 +1,21 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+
+# 查找依赖库
+find_dependency(OpenGL REQUIRED)
+find_dependency(GLEW REQUIRED)
+find_dependency(Qt5 COMPONENTS Widgets OpenGL REQUIRED)
+find_dependency(glm REQUIRED)
+
+# 导入目标
+include("${CMAKE_CURRENT_LIST_DIR}/octo_flex_view-targets.cmake")
+
+# 定义一个宏，使用者可以通过这个宏快速设置必要的编译选项
+macro(octo_flex_view_setup_target target)
+    # 设置包含目录
+    target_include_directories(${target} PRIVATE "${PACKAGE_PREFIX_DIR}/include")
+    
+    # 链接主要目标
+    target_link_libraries(${target} PRIVATE octo_flex::octo_flex_view)
+endmacro() 
