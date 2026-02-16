@@ -23,6 +23,7 @@
 
 #include "octo_flex_export.h"
 #include "def.h"
+#include "recording_options.h"
 
 class QWidget;
 
@@ -159,6 +160,15 @@ class OCTO_FLEX_VIEW_API EmbeddedViewer {
      *       Returns an empty vector if no view is active or no objects are selected.
      */
     std::vector<std::string> exportSelectedObjectIds() const;
+
+    // Container-level recording controls.
+    bool startRecording(const RecordingOptions& options);
+    bool pauseRecording();
+    bool resumeRecording();
+    bool stopRecording();
+    bool isRecording() const;
+    bool isRecordingPaused() const;
+    std::string getLastRecordingError() const;
 
     /**
      * @brief Destructor
@@ -375,6 +385,15 @@ class OCTO_FLEX_VIEW_API OctoFlexViewer {
      *       Returns an empty vector if no view is active or no objects are selected.
      */
     std::vector<std::string> exportSelectedObjectIds() const;
+
+    // Container-level recording controls.
+    bool startRecording(const RecordingOptions& options);
+    bool pauseRecording();
+    bool resumeRecording();
+    bool stopRecording();
+    bool isRecording() const;
+    bool isRecordingPaused() const;
+    std::string getLastRecordingError() const;
 
     /**
      * @brief Destructor

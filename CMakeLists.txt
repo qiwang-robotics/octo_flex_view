@@ -48,6 +48,7 @@ add_library(octo_flex_view SHARED
     src/octo_flex_viewer.cpp
     src/object_builder.cpp
     src/builtin_textures.cpp
+    src/video_recorder.cpp
 )
 
 # Link libraries

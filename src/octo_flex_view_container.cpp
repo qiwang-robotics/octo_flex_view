@@ -16,12 +16,19 @@
 
 
 #include "octo_flex_view_container.h"
+#include <algorithm>
 #include <QBoxLayout>
+#include <QDateTime>
+#include <QFileDialog>
 #include <QFocusEvent>
+#include <QMessageBox>
 #include <QMouseEvent>
+#include <QResizeEvent>
 #include <QSplitter>
+#include <QStandardPaths>
 #include <QTimer>
 #include <iostream>
+#include "video_recorder.h"
 
 namespace octo_flex {
 
@@ -39,9 +46,27 @@ OctoFlexViewContainer::OctoFlexViewContainer(QWidget* parent)
 
     // Set layout.
     setLayout(layout);
+
+    // Frame capture timer for recording.
+    recordingTimer_ = new QTimer(this);
+    connect(recordingTimer_, &QTimer::timeout, this, &OctoFlexViewContainer::captureRecordingFrame);
+
+    // Status timer for updating elapsed recording time.
+    recordingStatusTimer_ = new QTimer(this);
+    recordingStatusTimer_->setInterval(200);
+    connect(recordingStatusTimer_, &QTimer::timeout, this, &OctoFlexViewContainer::updateRecordingStatusLabel);
+
+    // Global overlay label shown while recording.
+    recordingStatusLabel_ = new QLabel(this);
+    recordingStatusLabel_->setStyleSheet(
+        "QLabel { background-color: rgba(200, 32, 32, 180); color: white; border-radius: 4px; padding: 4px 8px; }");
+    recordingStatusLabel_->setAttribute(Qt::WA_TransparentForMouseEvents);
+    recordingStatusLabel_->hide();
 }
 
 OctoFlexViewContainer::~OctoFlexViewContainer() {
+    stopRecording();
+
     // Clear view list.
     views_.clear();
 }
@@ -63,6 +88,164 @@ void OctoFlexViewContainer::setObjectManager(ObjectManager::Ptr obj_mgr) {
         }
     }
 }
+
+bool OctoFlexViewContainer::startRecording(const RecordingOptions& options) {
+    if (isRecording_) {
+        lastRecordingError_ = "Recording is already running";
+        return false;
+    }
+
+    if (options.fps <= 0) {
+        lastRecordingError_ = "Recording FPS must be greater than zero";
+        return false;
+    }
+
+    if (options.output_path.empty()) {
+        lastRecordingError_ = "Recording output path is empty";
+        return false;
+    }
+
+    if (width() <= 0 || height() <= 0) {
+        lastRecordingError_ = "Container size is invalid for recording";
+        return false;
+    }
+
+    QPixmap pixmap = grab();
+    if (pixmap.isNull()) {
+        lastRecordingError_ = "Failed to capture initial container frame";
+        return false;
+    }
+
+    QImage frame = pixmap.toImage().convertToFormat(QImage::Format_RGB888);
+    if (frame.isNull() || frame.width() <= 0 || frame.height() <= 0) {
+        lastRecordingError_ = "Captured frame is invalid";
+        return false;
+    }
+
+    recordingOptions_ = options;
+    recordingWidth_ = frame.width();
+    recordingHeight_ = frame.height();
+    // yuv420p (used by default) requires even dimensions.
+    if (recordingWidth_ % 2 != 0) {
+        recordingWidth_ -= 1;
+    }
+    if (recordingHeight_ % 2 != 0) {
+        recordingHeight_ -= 1;
+    }
+    if (recordingWidth_ <= 0 || recordingHeight_ <= 0) {
+        lastRecordingError_ = "Invalid recording dimensions after normalization";
+        return false;
+    }
+    if (frame.width() != recordingWidth_ || frame.height() != recordingHeight_) {
+        frame = frame.scaled(recordingWidth_, recordingHeight_, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+    }
+    recordedElapsedMs_ = 0;
+    lastRecordingError_.clear();
+
+    if (!recorder_) {
+        recorder_ = std::make_unique<VideoRecorder>();
+    }
+
+    VideoRecorderOptions recorderOptions;
+    recorderOptions.outputPath = options.output_path;
+    recorderOptions.width = recordingWidth_;
+    recorderOptions.height = recordingHeight_;
+    recorderOptions.fps = options.fps;
+    recorderOptions.codec = options.codec;
+    recorderOptions.preset = options.preset;
+    recorderOptions.crf = options.crf;
+    recorderOptions.overwrite = options.overwrite;
+
+    std::string error;
+    if (!recorder_->start(recorderOptions, &error)) {
+        lastRecordingError_ = error;
+        return false;
+    }
+
+    if (!recorder_->writeFrame(frame, &error)) {
+        lastRecordingError_ = error;
+        recorder_->stop();
+        return false;
+    }
+
+    const int intervalMs = std::max(1, 1000 / options.fps);
+    recordingTimer_->start(intervalMs);
+    recordingStatusTimer_->start();
+
+    isRecording_ = true;
+    isRecordingPaused_ = false;
+    recordingSegmentTimer_.start();
+    updateRecordingStatusLabel();
+    recordingStatusLabel_->show();
+
+    return true;
+}
+
+bool OctoFlexViewContainer::pauseRecording() {
+    if (!isRecording_ || isRecordingPaused_) {
+        return false;
+    }
+
+    recordedElapsedMs_ += recordingSegmentTimer_.elapsed();
+    isRecordingPaused_ = true;
+    updateRecordingStatusLabel();
+    return true;
+}
+
+bool OctoFlexViewContainer::resumeRecording() {
+    if (!isRecording_ || !isRecordingPaused_) {
+        return false;
+    }
+
+    isRecordingPaused_ = false;
+    recordingSegmentTimer_.restart();
+    updateRecordingStatusLabel();
+    return true;
+}
+
+bool OctoFlexViewContainer::stopRecording() {
+    if (!isRecording_ && !recorder_) {
+        return false;
+    }
+
+    if (isRecording_ && !isRecordingPaused_) {
+        recordedElapsedMs_ += recordingSegmentTimer_.elapsed();
+    }
+
+    if (recordingTimer_) {
+        recordingTimer_->stop();
+    }
+    if (recordingStatusTimer_) {
+        recordingStatusTimer_->stop();
+    }
+
+    bool ok = true;
+    if (recorder_) {
+        std::string error;
+        ok = recorder_->stop(&error);
+        if (!ok && lastRecordingError_.empty()) {
+            lastRecordingError_ = error;
+        }
+    }
+
+    isRecording_ = false;
+    isRecordingPaused_ = false;
+    recordedElapsedMs_ = 0;
+    recordingWidth_ = 0;
+    recordingHeight_ = 0;
+
+    if (recordingStatusLabel_) {
+        recordingStatusLabel_->hide();
+    }
+
+    return ok;
+}
+
+bool OctoFlexViewContainer::isRecording() const { return isRecording_; }
+
+bool OctoFlexViewContainer::isRecordingPaused() const { return isRecordingPaused_; }
+
+std::string OctoFlexViewContainer::getLastRecordingError() const { return lastRecordingError_; }
 
 OctoFlexView* OctoFlexViewContainer::createInitialView() {
     // If views already exist, skip creation.
@@ -133,6 +316,63 @@ bool OctoFlexViewContainer::eventFilter(QObject* watched, QEvent* event) {
                 // Find the view's context menu.
                 QMenu* menu = view->findChild<QMenu*>();
                 if (menu) {
+                    // Add recording actions group (container-wide).
+                    QMenu* recordingMenu = menu->addMenu("Recording");
+
+                    QAction* startRecordingAction = new QAction("Start Recording...", recordingMenu);
+                    startRecordingAction->setEnabled(!isRecording_);
+                    connect(startRecordingAction, &QAction::triggered, this, [this]() {
+                        if (QStandardPaths::findExecutable("ffmpeg").isEmpty()) {
+                            QMessageBox::critical(this, "Recording Error",
+                                                  "Recording could not start because ffmpeg was not found in PATH.\n"
+                                                  "Please install ffmpeg and try again.");
+                            return;
+                        }
+
+                        RecordingOptions options;
+                        options.fps = 30;
+                        options.codec = "libx264";
+                        options.preset = "veryfast";
+                        options.crf = 23;
+                        options.overwrite = true;
+
+                        const QString defaultName =
+                            QString("octo_flex_recording_%1.mp4").arg(QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss"));
+                        const QString selected = QFileDialog::getSaveFileName(
+                            this, "Save Recording", defaultName, "MP4 Video (*.mp4)");
+                        if (selected.isEmpty()) {
+                            return;
+                        }
+                        options.output_path = selected.toStdString();
+                        if (!startRecording(options)) {
+                            QMessageBox::critical(this, "Recording Error",
+                                                  QString::fromStdString("Start recording failed: " +
+                                                                         getLastRecordingError()));
+                        }
+                    });
+                    recordingMenu->addAction(startRecordingAction);
+
+                    QAction* pauseRecordingAction = new QAction("Pause Recording", recordingMenu);
+                    pauseRecordingAction->setEnabled(isRecording_ && !isRecordingPaused_);
+                    connect(pauseRecordingAction, &QAction::triggered, this, [this]() { pauseRecording(); });
+                    recordingMenu->addAction(pauseRecordingAction);
+
+                    QAction* resumeRecordingAction = new QAction("Resume Recording", recordingMenu);
+                    resumeRecordingAction->setEnabled(isRecording_ && isRecordingPaused_);
+                    connect(resumeRecordingAction, &QAction::triggered, this, [this]() { resumeRecording(); });
+                    recordingMenu->addAction(resumeRecordingAction);
+
+                    QAction* stopRecordingAction = new QAction("Stop Recording", recordingMenu);
+                    stopRecordingAction->setEnabled(isRecording_);
+                    connect(stopRecordingAction, &QAction::triggered, this, [this]() {
+                        if (!stopRecording()) {
+                            QMessageBox::critical(
+                                this, "Recording Error",
+                                QString::fromStdString("Stop recording failed: " + getLastRecordingError()));
+                        }
+                    });
+                    recordingMenu->addAction(stopRecordingAction);
+
                     // Add separator.
                     menu->addSeparator();
 
@@ -161,6 +401,18 @@ bool OctoFlexViewContainer::eventFilter(QObject* watched, QEvent* event) {
         }
     }
     return QWidget::eventFilter(watched, event);
+}
+
+void OctoFlexViewContainer::resizeEvent(QResizeEvent* event) {
+    QWidget::resizeEvent(event);
+
+    if (!recordingStatusLabel_) {
+        return;
+    }
+
+    recordingStatusLabel_->adjustSize();
+    const int margin = 10;
+    recordingStatusLabel_->move(width() - recordingStatusLabel_->width() - margin, margin);
 }
 
 OctoFlexView* OctoFlexViewContainer::createView() {
@@ -498,6 +750,62 @@ void OctoFlexViewContainer::cleanupEmptySplitters(QWidget* widget) {
             splitter->deleteLater();
         }
     }
+}
+
+void OctoFlexViewContainer::captureRecordingFrame() {
+    if (!isRecording_ || isRecordingPaused_ || !recorder_) {
+        return;
+    }
+
+    QPixmap pixmap = grab();
+    if (pixmap.isNull()) {
+        lastRecordingError_ = "Failed to capture container frame";
+        stopRecording();
+        return;
+    }
+
+    QImage frame = pixmap.toImage().convertToFormat(QImage::Format_RGB888);
+    if (frame.width() != recordingWidth_ || frame.height() != recordingHeight_) {
+        frame = frame.scaled(recordingWidth_, recordingHeight_, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+    }
+
+    std::string error;
+    if (!recorder_->writeFrame(frame, &error)) {
+        lastRecordingError_ = error;
+        stopRecording();
+    }
+}
+
+void OctoFlexViewContainer::updateRecordingStatusLabel() {
+    if (!recordingStatusLabel_ || !isRecording_) {
+        return;
+    }
+
+    const qint64 totalMs = currentRecordedMs();
+    const int totalSec = static_cast<int>(totalMs / 1000);
+    const int mm = totalSec / 60;
+    const int ss = totalSec % 60;
+
+    const QString prefix = isRecordingPaused_ ? "REC (PAUSED)" : "REC";
+    recordingStatusLabel_->setText(QString("%1  %2:%3")
+                                       .arg(prefix)
+                                       .arg(mm, 2, 10, QChar('0'))
+                                       .arg(ss, 2, 10, QChar('0')));
+    recordingStatusLabel_->adjustSize();
+    const int margin = 10;
+    recordingStatusLabel_->move(width() - recordingStatusLabel_->width() - margin, margin);
+}
+
+qint64 OctoFlexViewContainer::currentRecordedMs() const {
+    if (!isRecording_) {
+        return 0;
+    }
+
+    if (isRecordingPaused_) {
+        return recordedElapsedMs_;
+    }
+
+    return recordedElapsedMs_ + recordingSegmentTimer_.elapsed();
 }
 
 }  // namespace octo_flex

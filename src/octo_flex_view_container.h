@@ -20,15 +20,21 @@
 
 
 #include <QAction>
+#include <QElapsedTimer>
+#include <QLabel>
 #include <QMenu>
 #include <QSplitter>
+#include <QTimer>
 #include <QWidget>
 #include <map>
 #include <memory>
 #include <vector>
+#include "recording_options.h"
 #include "octo_flex_view.h"
 
 namespace octo_flex {
+
+class VideoRecorder;
 
 class OctoFlexViewContainer : public QWidget {
     Q_OBJECT
@@ -50,6 +56,15 @@ class OctoFlexViewContainer : public QWidget {
 
     // Create the initial view.
     OctoFlexView* createInitialView();
+
+    // Container-level recording controls.
+    bool startRecording(const RecordingOptions& options);
+    bool pauseRecording();
+    bool resumeRecording();
+    bool stopRecording();
+    bool isRecording() const;
+    bool isRecordingPaused() const;
+    std::string getLastRecordingError() const;
 
    public slots:
     // Split the current view vertically (top/bottom).
@@ -73,6 +88,7 @@ class OctoFlexViewContainer : public QWidget {
 
     // Event filter (tracks the active view).
     bool eventFilter(QObject* watched, QEvent* event) override;
+    void resizeEvent(QResizeEvent* event) override;
 
    private:
     // Create a new view.
@@ -99,6 +115,15 @@ class OctoFlexViewContainer : public QWidget {
     // Update the "only view" state.
     void updateViewsOnlyStatus();
 
+    // Capture one container frame for recording.
+    void captureRecordingFrame();
+
+    // Update overlay text for recording status.
+    void updateRecordingStatusLabel();
+
+    // Current recorded time in milliseconds.
+    qint64 currentRecordedMs() const;
+
    private:
     QSplitter* mainSplitter_;           // Main splitter.
     OctoFlexView* currentView_;         // Currently active view.
@@ -111,6 +136,20 @@ class OctoFlexViewContainer : public QWidget {
 
     // View ID counter for assigning unique IDs.
     int viewIdCounter_ = 1;
+
+    // Recording state.
+    RecordingOptions recordingOptions_;
+    std::unique_ptr<VideoRecorder> recorder_;
+    QTimer* recordingTimer_ = nullptr;
+    QTimer* recordingStatusTimer_ = nullptr;
+    QLabel* recordingStatusLabel_ = nullptr;
+    bool isRecording_ = false;
+    bool isRecordingPaused_ = false;
+    qint64 recordedElapsedMs_ = 0;
+    QElapsedTimer recordingSegmentTimer_;
+    int recordingWidth_ = 0;
+    int recordingHeight_ = 0;
+    std::string lastRecordingError_;
 };
 
 }  // namespace octo_flex

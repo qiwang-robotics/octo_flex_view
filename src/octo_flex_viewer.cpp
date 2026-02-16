@@ -127,6 +127,47 @@ std::vector<std::string> EmbeddedViewer::exportSelectedObjectIds() const {
     return std::vector<std::string>(selectedIds.begin(), selectedIds.end());
 }
 
+bool EmbeddedViewer::startRecording(const RecordingOptions& options) {
+    if (!impl_->container) {
+        return false;
+    }
+    return impl_->container->startRecording(options);
+}
+
+bool EmbeddedViewer::pauseRecording() {
+    if (!impl_->container) {
+        return false;
+    }
+    return impl_->container->pauseRecording();
+}
+
+bool EmbeddedViewer::resumeRecording() {
+    if (!impl_->container) {
+        return false;
+    }
+    return impl_->container->resumeRecording();
+}
+
+bool EmbeddedViewer::stopRecording() {
+    if (!impl_->container) {
+        return false;
+    }
+    return impl_->container->stopRecording();
+}
+
+bool EmbeddedViewer::isRecording() const { return impl_->container && impl_->container->isRecording(); }
+
+bool EmbeddedViewer::isRecordingPaused() const {
+    return impl_->container && impl_->container->isRecordingPaused();
+}
+
+std::string EmbeddedViewer::getLastRecordingError() const {
+    if (!impl_->container) {
+        return "Container not initialized";
+    }
+    return impl_->container->getLastRecordingError();
+}
+
 // ============================================================================
 // OctoFlexViewer::Impl - Private implementation
 // ============================================================================
@@ -376,6 +417,52 @@ std::vector<std::string> OctoFlexViewer::exportSelectedObjectIds() const {
 
     const std::set<std::string>& selectedIds = currentView->getSelectedObjects();
     return std::vector<std::string>(selectedIds.begin(), selectedIds.end());
+}
+
+bool OctoFlexViewer::startRecording(const RecordingOptions& options) {
+    if (!impl_->container) {
+        return false;
+    }
+
+    if (impl_->window && !impl_->window->isVisible()) {
+        impl_->window->show();
+        QCoreApplication::processEvents();
+    }
+    return impl_->container->startRecording(options);
+}
+
+bool OctoFlexViewer::pauseRecording() {
+    if (!impl_->container) {
+        return false;
+    }
+    return impl_->container->pauseRecording();
+}
+
+bool OctoFlexViewer::resumeRecording() {
+    if (!impl_->container) {
+        return false;
+    }
+    return impl_->container->resumeRecording();
+}
+
+bool OctoFlexViewer::stopRecording() {
+    if (!impl_->container) {
+        return false;
+    }
+    return impl_->container->stopRecording();
+}
+
+bool OctoFlexViewer::isRecording() const { return impl_->container && impl_->container->isRecording(); }
+
+bool OctoFlexViewer::isRecordingPaused() const {
+    return impl_->container && impl_->container->isRecordingPaused();
+}
+
+std::string OctoFlexViewer::getLastRecordingError() const {
+    if (!impl_->container) {
+        return "Container not initialized";
+    }
+    return impl_->container->getLastRecordingError();
 }
 
 }  // namespace octo_flex
