@@ -250,6 +250,68 @@ auto objManager = viewer.objectManager();
 
 ---
 
+## 视频录制
+
+OctoFlexView 支持容器级视频录制，正确渲染透明物体。
+
+### 基础录制
+
+```cpp
+auto viewer = OctoFlexViewer::create("录制演示");
+
+// 添加透明物体
+viewer.addSphere("transparent_sphere", Vec3(0, 0, 0), 1.0, 0.5);  // 50% 透明
+
+// 开始录制
+octo_flex::RecordingOptions options;
+options.output_path = "output.mp4";
+options.fps = 30;
+viewer.startRecording(options);
+
+// ... 你的动画或交互 ...
+
+// 停止录制
+viewer.stopRecording();
+```
+
+### 录制选项
+
+```cpp
+octo_flex::RecordingOptions options;
+options.output_path = "output.mp4";  // 输出文件路径
+options.fps = 30;                     // 帧率
+options.codec = "libx264";            // 视频编码器
+options.preset = "veryfast";          // 编码预设
+options.crf = 23;                     // 质量（越低越好，推荐 18-28）
+options.overwrite = true;             // 覆盖已存在文件
+
+viewer.startRecording(options);
+```
+
+### 暂停和恢复
+
+```cpp
+viewer.pauseRecording();   // 暂停录制
+viewer.resumeRecording();  // 恢复录制
+```
+
+### 录制状态
+
+```cpp
+bool isRecording = viewer.isRecording();      // 是否正在录制
+bool isPaused = viewer.isRecordingPaused();   // 是否已暂停
+std::string error = viewer.getLastRecordingError();  // 获取错误信息
+```
+
+### 技术说明
+
+- 使用 `glReadPixels` 直接从 OpenGL 帧缓冲区捕获帧
+- 透明物体通过正确的深度排序渲染
+- 两遍渲染：先渲染不透明物体，再渲染透明物体
+- 需要安装 `ffmpeg` 并在 PATH 中可用
+
+---
+
 ## 许可证
 
 本项目采用 Apache License 2.0 - 详见 [LICENSE](LICENSE) 文件。

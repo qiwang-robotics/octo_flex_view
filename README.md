@@ -251,6 +251,68 @@ auto objManager = viewer.objectManager();
 
 ---
 
+## Video Recording
+
+OctoFlexView supports container-level video recording with proper transparent object rendering.
+
+### Basic recording
+
+```cpp
+auto viewer = OctoFlexViewer::create("Recording Demo");
+
+// Add objects with transparency
+viewer.addSphere("transparent_sphere", Vec3(0, 0, 0), 1.0, 0.5);  // 50% transparent
+
+// Start recording
+octo_flex::RecordingOptions options;
+options.output_path = "output.mp4";
+options.fps = 30;
+viewer.startRecording(options);
+
+// ... your animation or interaction ...
+
+// Stop recording
+viewer.stopRecording();
+```
+
+### Recording options
+
+```cpp
+octo_flex::RecordingOptions options;
+options.output_path = "output.mp4";  // Output file path
+options.fps = 30;                     // Frame rate
+options.codec = "libx264";            // Video codec
+options.preset = "veryfast";          // Encoding preset
+options.crf = 23;                     // Quality (lower = better, 18-28 recommended)
+options.overwrite = true;             // Overwrite existing file
+
+viewer.startRecording(options);
+```
+
+### Pause and resume
+
+```cpp
+viewer.pauseRecording();   // Pause recording
+viewer.resumeRecording();  // Resume recording
+```
+
+### Recording status
+
+```cpp
+bool isRecording = viewer.isRecording();
+bool isPaused = viewer.isRecordingPaused();
+std::string error = viewer.getLastRecordingError();
+```
+
+### Technical notes
+
+- Frames are captured directly from the OpenGL framebuffer using `glReadPixels`
+- Transparent objects are rendered correctly with proper depth sorting
+- Two-pass rendering: opaque objects first, then transparent objects
+- Requires `ffmpeg` installed and available in PATH
+
+---
+
 ## License
 
 This project is licensed under the Apache License 2.0 - see [LICENSE](LICENSE) for details.
