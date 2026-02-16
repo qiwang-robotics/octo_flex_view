@@ -31,6 +31,7 @@ struct RecordingOptions {
     std::string preset = "veryfast";
     int crf = 23;
     bool overwrite = true;
+    bool enable_alpha = false;  // If true, preserves alpha channel for transparent objects
 };
 
 }  // namespace octo_flex

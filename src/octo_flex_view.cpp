@@ -2017,6 +2017,35 @@ void OctoFlexView::setViewId(const std::string& id) {
 // Get view ID.
 std::string OctoFlexView::getViewId() const { return viewId_; }
 
+// Capture current frame from OpenGL framebuffer.
+QImage OctoFlexView::captureFrame() {
+    // Read pixels from the OpenGL framebuffer
+    GLint viewport[4];
+    glGetIntegerv(GL_VIEWPORT, viewport);
+    int width = viewport[2];
+    int height = viewport[3];
+
+    if (width <= 0 || height <= 0) {
+        return QImage();
+    }
+
+    // Allocate buffer for RGBA pixels
+    std::vector<GLubyte> pixels(width * height * 4);
+
+    // Read pixels from the framebuffer
+    glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+
+    // OpenGL reads from bottom-left, QImage expects top-left
+    // Flip the image vertically
+    QImage image(width, height, QImage::Format_RGBA8888);
+    for (int y = 0; y < height; ++y) {
+        const GLubyte* src = pixels.data() + (height - 1 - y) * width * 4;
+        memcpy(image.scanLine(y), src, width * 4);
+    }
+
+    return image;
+}
+
 void OctoFlexView::expandView() {
     if (!isExpanded_) {
         isExpanded_ = true;

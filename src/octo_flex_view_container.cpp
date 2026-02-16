@@ -110,15 +110,15 @@ bool OctoFlexViewContainer::startRecording(const RecordingOptions& options) {
         return false;
     }
 
-    QPixmap pixmap = grab();
-    if (pixmap.isNull()) {
-        lastRecordingError_ = "Failed to capture initial container frame";
+    if (!currentView_) {
+        lastRecordingError_ = "No active view to capture";
         return false;
     }
 
-    QImage frame = pixmap.toImage().convertToFormat(QImage::Format_RGB888);
+    // Capture frame directly from OpenGL framebuffer of the current view
+    QImage frame = currentView_->captureFrame();
     if (frame.isNull() || frame.width() <= 0 || frame.height() <= 0) {
-        lastRecordingError_ = "Captured frame is invalid";
+        lastRecordingError_ = "Failed to capture initial OpenGL framebuffer";
         return false;
     }
 
@@ -155,6 +155,7 @@ bool OctoFlexViewContainer::startRecording(const RecordingOptions& options) {
     recorderOptions.preset = options.preset;
     recorderOptions.crf = options.crf;
     recorderOptions.overwrite = options.overwrite;
+    recorderOptions.enableAlpha = options.enable_alpha;
 
     std::string error;
     if (!recorder_->start(recorderOptions, &error)) {
@@ -753,18 +754,19 @@ void OctoFlexViewContainer::cleanupEmptySplitters(QWidget* widget) {
 }
 
 void OctoFlexViewContainer::captureRecordingFrame() {
-    if (!isRecording_ || isRecordingPaused_ || !recorder_) {
+    if (!isRecording_ || isRecordingPaused_ || !recorder_ || !currentView_) {
         return;
     }
 
-    QPixmap pixmap = grab();
-    if (pixmap.isNull()) {
-        lastRecordingError_ = "Failed to capture container frame";
+    // Capture frame directly from OpenGL framebuffer of the current view
+    QImage frame = currentView_->captureFrame();
+    if (frame.isNull()) {
+        lastRecordingError_ = "Failed to capture OpenGL framebuffer";
         stopRecording();
         return;
     }
 
-    QImage frame = pixmap.toImage().convertToFormat(QImage::Format_RGB888);
+    // Resize frame if needed
     if (frame.width() != recordingWidth_ || frame.height() != recordingHeight_) {
         frame = frame.scaled(recordingWidth_, recordingHeight_, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
     }

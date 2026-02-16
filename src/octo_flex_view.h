@@ -147,6 +147,9 @@ class OctoFlexView : public QOpenGLWidget, protected QOpenGLFunctions {
     void setViewId(const std::string& id);
     std::string getViewId() const;
 
+    // Capture current frame from OpenGL framebuffer (for video recording)
+    QImage captureFrame();
+
     // Update FPS info.
     void updateFpsInfo();
 

@@ -33,6 +33,7 @@ struct VideoRecorderOptions {
     std::string preset = "veryfast";
     int crf = 23;
     bool overwrite = true;
+    bool enableAlpha = false;  // If true, uses rgba format to preserve transparency
 };
 
 class VideoRecorder {

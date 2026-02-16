@@ -54,7 +54,7 @@ bool VideoRecorder::start(const VideoRecorderOptions& options, std::string* erro
     args << "-hide_banner" << "-loglevel" << "error";
     args << (options.overwrite ? "-y" : "-n");
     args << "-f" << "rawvideo";
-    args << "-pix_fmt" << "rgb24";
+    args << "-pix_fmt" << (options.enableAlpha ? "rgba" : "rgb24");
     args << "-s" << QString("%1x%2").arg(options.width).arg(options.height);
     args << "-r" << QString::number(options.fps);
     args << "-i" << "-";
@@ -62,7 +62,7 @@ bool VideoRecorder::start(const VideoRecorderOptions& options, std::string* erro
     args << "-c:v" << QString::fromStdString(options.codec);
     args << "-preset" << QString::fromStdString(options.preset);
     args << "-crf" << QString::number(options.crf);
-    args << "-pix_fmt" << "yuv420p";
+    args << "-pix_fmt" << (options.enableAlpha ? "yuva420p" : "yuv420p");
     args << QString::fromStdString(options.outputPath);
 
     process_->setProcessChannelMode(QProcess::MergedChannels);
@@ -83,21 +83,29 @@ bool VideoRecorder::writeFrame(const QImage& frame, std::string* error) {
         return false;
     }
 
-    QImage rgb = frame;
-    if (rgb.format() != QImage::Format_RGB888) {
-        rgb = rgb.convertToFormat(QImage::Format_RGB888);
+    QImage processed = frame;
+    if (options_.enableAlpha) {
+        // Preserve alpha channel by using RGBA format
+        if (processed.format() != QImage::Format_RGBA8888) {
+            processed = processed.convertToFormat(QImage::Format_RGBA8888);
+        }
+    } else {
+        // Discard alpha channel for RGB format
+        if (processed.format() != QImage::Format_RGB888) {
+            processed = processed.convertToFormat(QImage::Format_RGB888);
+        }
     }
 
-    if (rgb.width() != options_.width || rgb.height() != options_.height) {
-        rgb = rgb.scaled(options_.width, options_.height, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+    if (processed.width() != options_.width || processed.height() != options_.height) {
+        processed = processed.scaled(options_.width, options_.height, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
     }
 
-    const int rowBytes = options_.width * 3;
+    const int rowBytes = options_.width * (options_.enableAlpha ? 4 : 3);
     QByteArray packed;
     packed.resize(rowBytes * options_.height);
 
     for (int y = 0; y < options_.height; ++y) {
-        const char* src = reinterpret_cast<const char*>(rgb.constScanLine(y));
+        const char* src = reinterpret_cast<const char*>(processed.constScanLine(y));
         char* dst = packed.data() + y * rowBytes;
         memcpy(dst, src, rowBytes);
     }
