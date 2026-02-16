@@ -122,6 +122,9 @@ bool OctoFlexViewContainer::startRecording(const RecordingOptions& options) {
         return false;
     }
 
+    // Convert to RGB888 format for video recording
+    frame = frame.convertToFormat(QImage::Format_RGB888);
+
     recordingOptions_ = options;
     recordingWidth_ = frame.width();
     recordingHeight_ = frame.height();
@@ -155,7 +158,6 @@ bool OctoFlexViewContainer::startRecording(const RecordingOptions& options) {
     recorderOptions.preset = options.preset;
     recorderOptions.crf = options.crf;
     recorderOptions.overwrite = options.overwrite;
-    recorderOptions.enableAlpha = options.enable_alpha;
 
     std::string error;
     if (!recorder_->start(recorderOptions, &error)) {
@@ -765,6 +767,9 @@ void OctoFlexViewContainer::captureRecordingFrame() {
         stopRecording();
         return;
     }
+
+    // Convert to RGB888 format for video recording
+    frame = frame.convertToFormat(QImage::Format_RGB888);
 
     // Resize frame if needed
     if (frame.width() != recordingWidth_ || frame.height() != recordingHeight_) {
