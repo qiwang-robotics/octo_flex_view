@@ -29,6 +29,7 @@
 #include <QTimer>
 #include <iostream>
 #include "video_recorder.h"
+#include "recording_thread.h"
 
 namespace octo_flex {
 
@@ -144,10 +145,12 @@ bool OctoFlexViewContainer::startRecording(const RecordingOptions& options) {
     }
     recordedElapsedMs_ = 0;
     lastRecordingError_.clear();
+    recordingQueueWarningShown_ = false;
 
-    if (!recorder_) {
-        recorder_ = std::make_unique<VideoRecorder>();
-    }
+    // Create and start the recording thread.
+    recordingThread_ = std::make_unique<RecordingThread>();
+    connect(recordingThread_.get(), &RecordingThread::queueAlmostFull,
+            this, &OctoFlexViewContainer::onRecordingQueueAlmostFull);
 
     VideoRecorderOptions recorderOptions;
     recorderOptions.outputPath = options.output_path;
@@ -160,14 +163,17 @@ bool OctoFlexViewContainer::startRecording(const RecordingOptions& options) {
     recorderOptions.overwrite = options.overwrite;
 
     std::string error;
-    if (!recorder_->start(recorderOptions, &error)) {
+    if (!recordingThread_->startRecording(recorderOptions, &error)) {
         lastRecordingError_ = error;
+        recordingThread_.reset();
         return false;
     }
 
-    if (!recorder_->writeFrame(frame, &error)) {
-        lastRecordingError_ = error;
-        recorder_->stop();
+    // Queue the first frame.
+    if (!recordingThread_->queueFrame(frame)) {
+        lastRecordingError_ = "Failed to queue first frame";
+        recordingThread_->stopRecording(&error);
+        recordingThread_.reset();
         return false;
     }
 
@@ -207,7 +213,7 @@ bool OctoFlexViewContainer::resumeRecording() {
 }
 
 bool OctoFlexViewContainer::stopRecording() {
-    if (!isRecording_ && !recorder_) {
+    if (!isRecording_ && !recordingThread_) {
         return false;
     }
 
@@ -223,12 +229,13 @@ bool OctoFlexViewContainer::stopRecording() {
     }
 
     bool ok = true;
-    if (recorder_) {
+    if (recordingThread_) {
         std::string error;
-        ok = recorder_->stop(&error);
+        ok = recordingThread_->stopRecording(&error);
         if (!ok && lastRecordingError_.empty()) {
             lastRecordingError_ = error;
         }
+        recordingThread_.reset();
     }
 
     isRecording_ = false;
@@ -236,6 +243,7 @@ bool OctoFlexViewContainer::stopRecording() {
     recordedElapsedMs_ = 0;
     recordingWidth_ = 0;
     recordingHeight_ = 0;
+    recordingQueueWarningShown_ = false;
 
     if (recordingStatusLabel_) {
         recordingStatusLabel_->hide();
@@ -756,7 +764,7 @@ void OctoFlexViewContainer::cleanupEmptySplitters(QWidget* widget) {
 }
 
 void OctoFlexViewContainer::captureRecordingFrame() {
-    if (!isRecording_ || isRecordingPaused_ || !recorder_ || !currentView_) {
+    if (!isRecording_ || !currentView_) {
         return;
     }
 
@@ -776,9 +784,9 @@ void OctoFlexViewContainer::captureRecordingFrame() {
         frame = frame.scaled(recordingWidth_, recordingHeight_, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
     }
 
-    std::string error;
-    if (!recorder_->writeFrame(frame, &error)) {
-        lastRecordingError_ = error;
+    // Queue frame for async recording (non-blocking)
+    if (recordingThread_ && !recordingThread_->queueFrame(frame)) {
+        lastRecordingError_ = "Failed to queue frame - recording queue is full";
         stopRecording();
     }
 }
@@ -801,6 +809,22 @@ void OctoFlexViewContainer::updateRecordingStatusLabel() {
     recordingStatusLabel_->adjustSize();
     const int margin = 10;
     recordingStatusLabel_->move(width() - recordingStatusLabel_->width() - margin, margin);
+}
+
+void OctoFlexViewContainer::onRecordingQueueAlmostFull(int currentSize, int maxSize) {
+    if (recordingQueueWarningShown_) {
+        return;
+    }
+    recordingQueueWarningShown_ = true;
+
+    // Show a warning message to the user
+    QMessageBox::warning(
+        this, "Recording Queue Almost Full",
+        QString("The recording queue is nearly full (%1/%2 frames). "
+                "This may indicate that the system is too slow to encode frames in real-time. "
+                "Consider reducing the recording resolution or FPS.")
+            .arg(currentSize)
+            .arg(maxSize));
 }
 
 qint64 OctoFlexViewContainer::currentRecordedMs() const {

@@ -110,7 +110,11 @@ bool VideoRecorder::writeFrame(const QImage& frame, std::string* error) {
         memcpy(dst, src, rowBytes);
     }
 
-    return writeAll(packed.constData(), packed.size(), error);
+    bool result = writeAll(packed.constData(), packed.size(), error);
+    if (result) {
+        framesWritten_++;
+    }
+    return result;
 }
 
 bool VideoRecorder::stop(std::string* error) {
@@ -171,6 +175,7 @@ bool VideoRecorder::writeAll(const char* data, qint64 size, std::string* error) 
 }
 
 void VideoRecorder::setError(const std::string& message, std::string* error) {
+    lastError_ = message;
     if (error) {
         *error = message;
     }
