@@ -197,6 +197,7 @@ bool OctoFlexViewContainer::pauseRecording() {
 
     recordedElapsedMs_ += recordingSegmentTimer_.elapsed();
     isRecordingPaused_ = true;
+    recordingTimer_->stop();
     updateRecordingStatusLabel();
     return true;
 }
@@ -208,6 +209,7 @@ bool OctoFlexViewContainer::resumeRecording() {
 
     isRecordingPaused_ = false;
     recordingSegmentTimer_.restart();
+    recordingTimer_->start(recordingTimer_->interval());
     updateRecordingStatusLabel();
     return true;
 }
