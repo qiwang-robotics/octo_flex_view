@@ -130,15 +130,6 @@ bool RecordingThread::isRecording() const {
     return recordingActive_;
 }
 
-int RecordingThread::getQueueSize() const {
-    QMutexLocker locker(&queueMutex_);
-    return static_cast<int>(frameQueue_.size());
-}
-
-void RecordingThread::setMaxQueueSize(int max_size) {
-    maxQueueSize_ = max_size;
-}
-
 void RecordingThread::run() {
     // Create and start ffmpeg in this worker thread
     recorder_ = std::make_unique<VideoRecorder>();

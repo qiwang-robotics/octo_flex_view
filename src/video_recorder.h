@@ -47,9 +47,6 @@ class VideoRecorder {
 
     bool isRunning() const;
 
-    // Get ffmpeg process error string
-    std::string getLastError() const { return lastError_; }
-
    private:
     bool writeAll(const char* data, qint64 size, std::string* error);
     void setError(const std::string& message, std::string* error);
@@ -58,8 +55,6 @@ class VideoRecorder {
     std::unique_ptr<QProcess> process_;
     VideoRecorderOptions options_;
     bool started_ = false;
-    std::string lastError_;
-    int framesWritten_ = 0;
 };
 
 }  // namespace octo_flex

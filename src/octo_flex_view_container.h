@@ -144,7 +144,6 @@ class OctoFlexViewContainer : public QWidget {
     // Recording state.
     RecordingOptions recordingOptions_;
     std::unique_ptr<RecordingThread> recordingThread_;
-    std::unique_ptr<VideoRecorder> recorder_;  // Legacy, kept for compatibility
     QTimer* recordingTimer_ = nullptr;
     QTimer* recordingStatusTimer_ = nullptr;
     QLabel* recordingStatusLabel_ = nullptr;

@@ -49,16 +49,7 @@ class RecordingThread : public QThread {
     // Check if recording is active.
     bool isRecording() const;
 
-    // Get the number of queued frames.
-    int getQueueSize() const;
-
-    // Set maximum queue size (default: 60 frames).
-    void setMaxQueueSize(int max_size);
-
    signals:
-    // Emitted when recording starts.
-    void recordingStarted();
-
     // Emitted when recording stops.
     void recordingStopped(bool success, const std::string& error);
 
