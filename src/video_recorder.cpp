@@ -16,15 +16,10 @@
 
 #include "video_recorder.h"
 
-#include <QByteArray>
-#include <QDir>
-#include <QStandardPaths>
-#include <QStringList>
 #include <cstring>
+#include <sstream>
 
 namespace octo_flex {
-
-VideoRecorder::VideoRecorder() : process_(std::make_unique<QProcess>()) {}
 
 VideoRecorder::~VideoRecorder() {
     std::string ignored;
@@ -44,32 +39,27 @@ bool VideoRecorder::start(const VideoRecorderOptions& options, std::string* erro
 
     options_ = options;
 
-    const QString ffmpegPath = QStandardPaths::findExecutable("ffmpeg");
-    if (ffmpegPath.isEmpty()) {
-        setError("ffmpeg executable was not found in PATH", error);
-        return false;
-    }
+    // Build ffmpeg command line
+    std::ostringstream cmd;
+    cmd << "ffmpeg"
+        << " -hide_banner -loglevel error"
+        << (options.overwrite ? " -y" : " -n")
+        << " -f rawvideo"
+        << " -pix_fmt " << (options.enableAlpha ? "rgba" : "rgb24")
+        << " -s " << options.width << "x" << options.height
+        << " -r " << options.fps
+        << " -i -"
+        << " -an"
+        << " -c:v " << options.codec
+        << " -preset " << options.preset
+        << " -crf " << options.crf
+        << " -pix_fmt " << (options.enableAlpha ? "yuva420p" : "yuv420p")
+	<< " -movflags frag_keyframe+empty_moov"
+        << " " << options.outputPath;
 
-    QStringList args;
-    args << "-hide_banner" << "-loglevel" << "error";
-    args << (options.overwrite ? "-y" : "-n");
-    args << "-f" << "rawvideo";
-    args << "-pix_fmt" << (options.enableAlpha ? "rgba" : "rgb24");
-    args << "-s" << QString("%1x%2").arg(options.width).arg(options.height);
-    args << "-r" << QString::number(options.fps);
-    args << "-i" << "-";
-    args << "-an";
-    args << "-c:v" << QString::fromStdString(options.codec);
-    args << "-preset" << QString::fromStdString(options.preset);
-    args << "-crf" << QString::number(options.crf);
-    args << "-pix_fmt" << (options.enableAlpha ? "yuva420p" : "yuv420p");
-    args << QString::fromStdString(options.outputPath);
-
-    process_->setProcessChannelMode(QProcess::MergedChannels);
-    process_->start(ffmpegPath, args, QIODevice::WriteOnly);
-
-    if (!process_->waitForStarted(3000)) {
-        setError("Failed to start ffmpeg process", error);
+    pipe_ = popen(cmd.str().c_str(), "w");
+    if (!pipe_) {
+        setError("Failed to start ffmpeg process via popen", error);
         return false;
     }
 
@@ -78,19 +68,17 @@ bool VideoRecorder::start(const VideoRecorderOptions& options, std::string* erro
 }
 
 bool VideoRecorder::writeFrame(const QImage& frame, std::string* error) {
-    if (!started_ || !process_ || process_->state() != QProcess::Running) {
+    if (!started_ || !pipe_) {
         setError("Recorder is not running", error);
         return false;
     }
 
     QImage processed = frame;
     if (options_.enableAlpha) {
-        // Preserve alpha channel by using RGBA format
         if (processed.format() != QImage::Format_RGBA8888) {
             processed = processed.convertToFormat(QImage::Format_RGBA8888);
         }
     } else {
-        // Discard alpha channel for RGB format
         if (processed.format() != QImage::Format_RGB888) {
             processed = processed.convertToFormat(QImage::Format_RGB888);
         }
@@ -101,75 +89,38 @@ bool VideoRecorder::writeFrame(const QImage& frame, std::string* error) {
     }
 
     const int rowBytes = options_.width * (options_.enableAlpha ? 4 : 3);
-    QByteArray packed;
-    packed.resize(rowBytes * options_.height);
 
     for (int y = 0; y < options_.height; ++y) {
-        const char* src = reinterpret_cast<const char*>(processed.constScanLine(y));
-        char* dst = packed.data() + y * rowBytes;
-        memcpy(dst, src, rowBytes);
+        const unsigned char* src = processed.constScanLine(y);
+        size_t written = fwrite(src, 1, rowBytes, pipe_);
+        if (static_cast<int>(written) != rowBytes) {
+            setError("Failed writing frame data to ffmpeg pipe", error);
+            return false;
+        }
     }
 
-    bool result = writeAll(packed.constData(), packed.size(), error);
-    return result;
+    return true;
 }
 
 bool VideoRecorder::stop(std::string* error) {
-    if (!process_) {
+    if (!pipe_) {
         started_ = false;
         return true;
     }
 
-    if (process_->state() == QProcess::NotRunning) {
-        started_ = false;
-        return true;
-    }
-
-    process_->closeWriteChannel();
-    if (!process_->waitForFinished(30000)) {
-        process_->terminate();
-        if (!process_->waitForFinished(3000)) {
-            process_->kill();
-            process_->waitForFinished(1000);
-        }
-        started_ = false;
-        setError("ffmpeg did not stop cleanly (timeout)", error);
-        return false;
-    }
-
-    const bool ok = (process_->exitStatus() == QProcess::NormalExit && process_->exitCode() == 0);
-    if (!ok) {
-        const QString ffmpegOutput = QString::fromUtf8(process_->readAll());
-        const std::string message =
-            ffmpegOutput.isEmpty()
-                ? "ffmpeg exited with an error"
-                : ("ffmpeg exited with an error: " + ffmpegOutput.left(512).toStdString());
-        started_ = false;
-        setError(message, error);
-        return false;
-    }
-
+    int status = pclose(pipe_);
+    pipe_ = nullptr;
     started_ = false;
-    return true;
-}
 
-bool VideoRecorder::isRunning() const { return started_ && process_ && process_->state() == QProcess::Running; }
-
-bool VideoRecorder::writeAll(const char* data, qint64 size, std::string* error) {
-    qint64 written = 0;
-    while (written < size) {
-        const qint64 n = process_->write(data + written, size - written);
-        if (n <= 0) {
-            if (!process_->waitForBytesWritten(2000)) {
-                setError("Failed writing frame to ffmpeg process", error);
-                return false;
-            }
-            continue;
-        }
-        written += n;
+    if (status != 0) {
+        setError("ffmpeg exited with status " + std::to_string(status), error);
+        return false;
     }
+
     return true;
 }
+
+bool VideoRecorder::isRunning() const { return started_ && pipe_ != nullptr; }
 
 void VideoRecorder::setError(const std::string& message, std::string* error) {
     if (error) {

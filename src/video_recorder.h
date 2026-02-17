@@ -18,8 +18,7 @@
 #define VIDEO_RECORDER_H
 
 #include <QImage>
-#include <QProcess>
-#include <memory>
+#include <cstdio>
 #include <string>
 
 namespace octo_flex {
@@ -38,7 +37,7 @@ struct VideoRecorderOptions {
 
 class VideoRecorder {
    public:
-    VideoRecorder();
+    VideoRecorder() = default;
     ~VideoRecorder();
 
     bool start(const VideoRecorderOptions& options, std::string* error = nullptr);
@@ -48,11 +47,10 @@ class VideoRecorder {
     bool isRunning() const;
 
    private:
-    bool writeAll(const char* data, qint64 size, std::string* error);
     void setError(const std::string& message, std::string* error);
 
    private:
-    std::unique_ptr<QProcess> process_;
+    FILE* pipe_ = nullptr;
     VideoRecorderOptions options_;
     bool started_ = false;
 };
