@@ -204,9 +204,6 @@ OctoFlexView::OctoFlexView(QWidget* parent)
     setInfoItem("view_id", "View ID: " + viewId_);
     setInfoItem("fps", "FPS: 0.0");
     setInfoItem("refresh_rate", "Target Refresh Rate: " + std::to_string(refreshRate_) + " FPS");
-    setInfoItem("normal_msg", "Normal Info - Black Display");
-    setWarningItem("warning_msg", "Warning Info - Orange Display");
-    setErrorItem("error_msg", "Error Info - Red Display");
 
     // Add grid status info
     if (showGrid_) {
